@@ -19,7 +19,7 @@ with col_setting2:
 members = [chr(65 + i) for i in range(num)]
 st.info(f"선수 명단: {', '.join(members)}")
 
-# 최대 가능 코트 수 계산
+# 최대 가능 코트 수
 max_courts = num // 4
 current_courts = min(court_num, max_courts)
 
@@ -51,7 +51,6 @@ with col_btn2:
             if pair in st.session_state.bad_pairs: st.session_state.bad_pairs.remove(pair)
             st.session_state.must_pairs.append(pair)
 
-# 설정 목록
 st.markdown("---")
 col_list1, col_list2 = st.columns(2)
 with col_list1:
@@ -65,22 +64,24 @@ with col_list2:
         if st.button(f"🤝 {p[0]}-{p[1]}", key=f"del_m_{i}", use_container_width=True):
             st.session_state.must_pairs.pop(i); st.rerun()
 
-# 3. 경기 생성 및 대기자 로직
+# 3. 경기 생성 로직 (유연성 강화)
 st.divider()
-if st.button("🏁 다치지 말고 화이팅", type="primary", use_container_width=True):
+if st.button("🏁 매칭 생성", type="primary", use_container_width=True):
     temp_counts = st.session_state.counts.copy()
     all_matches = []
     used_in_round = set()
-    
     success_all_courts = True
+
     for c in range(int(current_courts)):
         success_this_court = False
         available = [m for m in members if m not in used_in_round]
         
-        for _ in range(2000):
-            # 경기수 적은 사람 우선 추출
-            candidates = sorted(available, key=lambda x: (temp_counts[x], random.random()))[:4]
-            if len(candidates) < 4: break
+        # [핵심 수정] 무조건 적게 뛴 순서가 아니라, 상위 n명 중 무작위로 섞어서 시도합니다.
+        # 시도 횟수를 늘리고 후보군을 유연하게 잡습니다.
+        for attempt in range(3000):
+            # 후보군: 경기 수가 적은 순서대로 정렬하되, 시도가 반복될수록 후보 범위를 조금씩 넓힙니다.
+            pool_size = min(len(available), 4 + (attempt // 500)) 
+            candidates = random.sample(sorted(available, key=lambda x: temp_counts[x])[:pool_size], 4)
             
             # 규칙 체크
             valid_sel = True
@@ -92,14 +93,15 @@ if st.button("🏁 다치지 말고 화이팅", type="primary", use_container_wi
             random.shuffle(candidates)
             t1, t2 = tuple(sorted(candidates[:2])), tuple(sorted(candidates[2:]))
             
-            is_bad = t1 in st.session_state.bad_pairs or t2 in st.session_state.bad_pairs
+            if t1 in st.session_state.bad_pairs or t2 in st.session_state.bad_pairs: continue
+            
             must_ok = True
             for mp in st.session_state.must_pairs:
                 if mp[0] in candidates and mp[1] in candidates:
                     if not ((mp[0] in t1 and mp[1] in t1) or (mp[0] in t2 and mp[1] in t2)):
                         must_ok = False; break
             
-            if not is_bad and must_ok:
+            if must_ok:
                 all_matches.append((t1, t2))
                 used_in_round.update(candidates)
                 for p in candidates: temp_counts[p] += 1
@@ -110,22 +112,19 @@ if st.button("🏁 다치지 말고 화이팅", type="primary", use_container_wi
 
     if success_all_courts:
         st.session_state.counts = temp_counts
-        # 1. 코트별 매칭 표시
         for i, m in enumerate(all_matches):
             st.success(f"🎾 {i+1} 코트 매칭")
             mc1, mc2 = st.columns(2)
             mc1.metric("TEAM 1", f"{m[0][0]} & {m[0][1]}")
             mc2.metric("TEAM 2", f"{m[1][0]} & {m[1][1]}")
         
-        # 2. 대기자 명단 표시 (중요!)
         waiting_players = [m for m in members if m not in used_in_round]
         if waiting_players:
             st.divider()
             st.subheader("⏳ 몸 푸세요")
-            # 대기자들을 보기 좋게 쉼표로 나열
             st.warning(f"대기 명단: {', '.join(waiting_players)}")
     else:
-        st.error("조건을 만족하는 매칭을 찾지 못했습니다. 설정을 조정해 주세요.")
+        st.error("조건을 만족하는 매칭을 찾지 못했습니다. 금지/고정 목록이 너무 많거나 특정 인원에게 몰려있을 수 있습니다.")
 
 with st.expander("📊 선수별 누적 경기 참여 횟수 보기"):
     st.table([st.session_state.counts])
